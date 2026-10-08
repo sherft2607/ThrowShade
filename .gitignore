@@ -4,6 +4,7 @@ app/server.log
 backend/throwshade.db
 backend/seed_data.json
 backend/live-backup.json
+backend/scripts/backup-*.json
 backend/uvicorn.log
 
 # MemPalace per-project files (issue #185)

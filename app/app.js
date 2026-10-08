@@ -36,18 +36,6 @@
   const KINDS = { building: 'Building', bridge: 'Bridge', art: 'Art', spot: 'Spot' };
   const kindOf = b => b.kind || 'building';
   const MAX_PHOTOS = 4;
-  // Stand-in photos for seeded critics' posts (app/seed-photos.js), credited under the photos.
-  const SEED_PHOTOS = window.TS_SEED_PHOTOS || {};
-  const PHOTO_CREDITS = {};
-  Object.values(SEED_PHOTOS).forEach(list => list.forEach(x => { PHOTO_CREDITS[x.url] = x.credit; }));
-  const SEED_PHOTO_COUNTS = [0, 2, 0, 1, 0, 0, 3, 0, 1, 0];
-  function seedPhotosFor(userId, bid, i) {
-    const pool = SEED_PHOTOS[bid] || [];
-    if (!pool.length) return [];
-    const shift = Math.max(0, window.TS_SEED_USERS.findIndex(u => u.id === userId));
-    const n = Math.min(SEED_PHOTO_COUNTS[i % SEED_PHOTO_COUNTS.length], pool.length);
-    return Array.from({ length: n }, (_, k) => pool[(shift + k) % pool.length].url);
-  }
   // Illustrated profile pictures offered in Edit profile (app/avatars/avatar_01.png … _32.png).
   const PRESET_AVATARS = Array.from({ length: 32 }, (_, i) => 'avatars/avatar_' + String(i + 1).padStart(2, '0') + '.png');
   // Facts shown as small icons on a place and explained in About: certifications (hand-checked, app/data.js),
@@ -89,19 +77,13 @@
     const src = [(f.heritage.length || f.awards.length || f.pritzker.length) && 'Wikidata', f.certs.length && 'certifying bodies (hand-checked)'].filter(Boolean);
     return `<div id="facts" class="facts"><div class="bold">Recognition</div>${rows.join('')}<div class="tiny muted">Sources: ${src.join(' · ')}</div></div>`;
   }
-  // Default "liked" aspects for seeded logs without explicit ones in data.js (TS_SEED_LIKES).
-  const STYLE_LIKES = {
-    Brutalist: ['Material', 'Structure', 'Scale'], Modernist: ['Design', 'Light', 'Space'], Postmodern: ['Facade', 'Detail', 'Vibes'],
-    Deconstructivist: ['Design', 'Vibes', 'Facade'], 'Art Deco': ['Facade', 'Detail', 'Craft'], 'High-tech': ['Structure', 'Engineering', 'Design'],
-    Contemporary: ['Design', 'Material', 'Context'], Historic: ['Craft', 'Detail', 'Facade'],
-  };
 
   // ---------- Backend sync ----------
   // Best-effort mirror of writes to the FastAPI/SQLite backend (backend/).
   // The app stays fully local-first and offline-capable: every call here is
   // fire-and-forget and swallows its own errors, so a slow or absent backend
   // never blocks a render. Comments, activity, badges/levels and Wrapped stay
-  // client-only — the backend doesn't model them (see backend/seed.py notes).
+  // client-only — the backend doesn't model them.
   const API_BASE = window.TS_API_BASE || 'https://throwshade.onrender.com';
   // Signed-in session: a bearer token from /auth/login or /auth/signup, kept on this device.
   const TOKEN_KEY = 'throwingshade.token';
@@ -194,10 +176,7 @@
   function buildStateFromBackend(data) {
     const pinned = data.places.filter(p => p.source !== 'seed');
     pinned.forEach(registerBuilding);
-    const users = data.users.map(u => {
-      const seedU = window.TS_SEED_USERS.find(s => s.id === u.id);
-      return (seedU && seedU.photo && !u.photo) ? Object.assign({}, u, { photo: seedU.photo }) : u;
-    });
+    const users = data.users.slice();
     const follows = data.follows.map(f => [f[0], f[1]]);
     return { me: null, users, follows, visits: data.visits.map(mapVisit), want: data.want.map(mapWant), places: pinned, lists: data.lists.map(normList), stories: (data.stories || []).map(normStory), storySeen: {}, activity: [], activitySeen: {} };
   }
@@ -292,46 +271,34 @@
     // "Concept" and "Atmosphere" were folded into "Vibes".
     v.likes = [...new Set(v.likes.map(l => (l === 'Concept' || l === 'Atmosphere' ? 'Vibes' : l)))];
   });
-  // (Re)apply stand-in photos to seeded posts; photos people uploaded (data: URLs) are never touched.
-  if (state.seedPhotos !== 3) {
-    state.visits.forEach(v => {
-      const m = /^v(\d+)$/.exec(v.id);
-      if (m && v.photos.every(p => !p.startsWith('data:'))) v.photos = seedPhotosFor(v.userId, v.buildingId, +m[1]);
-    });
-    state.seedPhotos = 3;
+  // Earlier builds shipped demo critics, their logs and two demo lists: saved to every device and
+  // seeded into the backend (backend/scripts/remove_demo_data.py clears them there). dropDemo strips
+  // them from a saved state or a GET /state payload (same field names); real people's data is untouched.
+  const DEMO_USERS = new Set(['u-mara', 'u-theo', 'u-priya', 'u-jonah', 'u-noor', 'u-shandon', 'u-felix', 'u-lena']);
+  const DEMO_LISTS = new Set(['l-mies', 'l-bridges']);
+  function dropDemo(s) {
+    const keep = (key, ok) => { if (Array.isArray(s[key])) s[key] = s[key].filter(ok); };
+    keep('users', u => !DEMO_USERS.has(u.id));
+    keep('visits', v => !DEMO_USERS.has(v.userId));
+    keep('follows', f => !DEMO_USERS.has(f[0]) && !DEMO_USERS.has(f[1]));
+    keep('want', w => !DEMO_USERS.has(w.userId));
+    keep('lists', l => !DEMO_LISTS.has(l.id) && !DEMO_USERS.has(l.ownerId));
+    (s.lists || []).forEach(l => { l.members = (l.members || []).filter(m => !DEMO_USERS.has(m)); });
+    keep('stories', st => !DEMO_USERS.has(st.userId));
+    keep('comments', c => !DEMO_USERS.has(c.userId) && !DEMO_USERS.has(c.visitUserId));
+    keep('hearts', h => !DEMO_USERS.has(h.userId) && !DEMO_USERS.has(h.visitUserId));
+    keep('activity', a => !DEMO_USERS.has(a.forUid) && !(a.data && DEMO_USERS.has(a.data.fromUid)));
   }
-  // Older saves predate the seeded critics' avatars.
-  window.TS_SEED_USERS.forEach(s => {
-    const u = state.users.find(x => x.id === s.id);
-    if (u && !u.photo && s.photo) u.photo = s.photo;
-    if (!u && !state.users.some(x => x.handle === s.handle)) {  // skip if someone already signed up with that handle
-      state.users.forEach(o => { state.follows.push([s.id, o.id]); state.follows.push([o.id, s.id]); });
-      state.users.push({ ...s });
-    }
-  });
+  if (!state.demoRemoved) {
+    dropDemo(state);
+    delete state.seedPhotos;
+    state.demoRemoved = true;
+    save();
+  }
 
+  // A fresh device starts empty; people, logs and lists all come from the backend (pullFromBackend).
   function seed() {
-    const now = Date.now();
-    const users = window.TS_SEED_USERS.map(u => ({ ...u }));
-    const follows = [];
-    users.forEach(a => users.forEach(b => { if (a.id !== b.id) follows.push([a.id, b.id]); }));
-    const seedLikes = (userId, bid, stars, i) => {
-      const set = (window.TS_SEED_LIKES || {})[userId + '|' + bid];
-      if (set) return set.slice();
-      const b = BY_ID[bid];
-      return !b || stars < 3 ? [] : (STYLE_LIKES[b.style] || ['Design']).slice(0, 2 + (i % 2));
-    };
-    const visits = window.TS_SEED_VISITS.map(([userId, buildingId, stars, note, h], i) => ({
-      id: 'v' + i, userId, buildingId, stars, note, photos: seedPhotosFor(userId, buildingId, i), likes: seedLikes(userId, buildingId, stars, i),
-      visitedOn: isoDate(now - h * HOUR - (i % 4) * DAY),
-      createdAt: now - h * HOUR,
-    }));
-    const want = window.TS_SEED_WANT.map(([userId, buildingId]) => ({ userId, buildingId, createdAt: now }));
-    const lists = (window.TS_SEED_LISTS || []).map(l => ({
-      id: l.id, name: l.name, ownerId: l.ownerId, members: l.members.slice(), invitesNewUsers: !!l.invitesNewUsers, createdAt: now - l.hoursAgo * HOUR,
-      items: l.items.filter(([bid]) => BY_ID[bid]).map(([bid, by], i) => ({ buildingId: bid, addedBy: by || l.ownerId, createdAt: now - (l.hoursAgo - i) * HOUR })),
-    }));
-    return { me: null, users, follows, visits, want, places: [], lists, activity: [], activitySeen: {} };
+    return { me: null, users: [], follows: [], visits: [], want: [], places: [], lists: [], stories: [], storySeen: {}, activity: [], activitySeen: {}, demoRemoved: true };
   }
   function load() {
     try { const s = JSON.parse(localStorage.getItem(KEY)); return s && s.users ? Object.assign({ places: [], lists: [], activity: [], activitySeen: {} }, s) : null; } catch (e) { return null; }
@@ -795,12 +762,14 @@
     return String(name).replace(/[^\p{L}\p{N} ]/gu, ' ').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
   }
   function km(a, b) {
+    if (!a) return Infinity;  // location not shared yet
     const R = 6371, toR = x => x * Math.PI / 180;
     const dLat = toR(b.lat - a.lat), dLng = toR(b.lng - a.lng);
     const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(a.lat)) * Math.cos(toR(b.lat)) * Math.sin(dLng / 2) ** 2;
     return 2 * R * Math.asin(Math.sqrt(h));
   }
   function fmtKm(d) {
+    if (!isFinite(d)) return '';
     if (d < 1) return Math.round(d * 1000 / 10) * 10 + ' m';
     if (d < 100) return d.toFixed(1) + ' km';
     return Math.round(d).toLocaleString('en-GB') + ' km';
@@ -907,11 +876,7 @@
     if (!photos || !photos.length) return '';
     const list = photos.slice(0, MAX_PHOTOS);
     const g = gallery(list);
-    const credits = list.map(p => PHOTO_CREDITS[p]).filter(Boolean);
-    const creditLine = credits.length
-      ? `<div class="shot-credit">Photo${credits.length > 1 ? 's' : ''}: ${esc([...new Set(credits.map(c => c.artist))].join(', '))} · <a href="${esc(credits[0].page)}" target="_blank" rel="noopener">Wikimedia Commons</a></div>`
-      : '';
-    return `<div class="shots n${list.length}">${list.map((p, i) => `<button class="shot" data-act="viewphoto" data-g="${g}" data-i="${i}" style="background-image:url('${p}')" aria-label="View photo ${i + 1} of ${list.length}"></button>`).join('')}</div>${creditLine}`;
+    return `<div class="shots n${list.length}">${list.map((p, i) => `<button class="shot" data-act="viewphoto" data-g="${g}" data-i="${i}" style="background-image:url('${p}')" aria-label="View photo ${i + 1} of ${list.length}"></button>`).join('')}</div>`;
   }
   const phLabel = b => [b.style, b.year].filter(Boolean).join(' · ').toUpperCase();
   const byLine = b => [b.architect, b.year].filter(Boolean).join(' · ');
@@ -981,18 +946,20 @@
   }
 
   // ---------- Location ----------
-  let loc = { ...window.TS_DEMO_LOCATION, demo: true };
+  // null until the person shares their location; nothing pretends they're somewhere else.
+  let loc = null;
   let locAsked = false;
   function requestLocation(cb) {
-    if (window.TS_DEMO_LOCATION.force || !navigator.geolocation) { cb && cb(false, 'unsupported'); return; }
+    if (!navigator.geolocation) { cb && cb(false, 'unsupported'); return; }
     navigator.geolocation.getCurrentPosition(
-      p => { loc = { lat: p.coords.latitude, lng: p.coords.longitude, label: 'your location', demo: false }; cb && cb(true); },
+      p => { if (!loc) mapView = null; loc = { lat: p.coords.latitude, lng: p.coords.longitude }; cb && cb(true); },
       e => cb && cb(false, e.code === 1 ? 'denied' : 'unavailable'),
       { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
     );
   }
   const nearest = list => list.map(b => ({ b, d: km(loc, b) })).sort((x, y) => x.d - y.d);
-  const locNote = () => loc.demo ? `from ${esc(loc.label)} (demo location)` : 'from your location';
+  // Shown where "Nearby" would be until the person shares their location.
+  const locPrompt = () => `<button class="game-card" style="margin-top:12px" data-act="uselocation"><span class="game-card-icon">${icon('locate', 'sm')}</span><span class="grow"><b>See what’s near you</b><span class="small muted" style="display:block">Share your location to sort places by distance</span></span>${icon('chevron', 'sm')}</button>`;
 
   // ---------- UI state ----------
   const root = document.getElementById('app');
@@ -1133,7 +1100,7 @@
         <div class="rail-name ellipsis">${esc(x.b.name)}</div><div class="rail-meta muted ellipsis">${meta(x)}</div></button>`).join('')}</div>` : '';
     const trend = trending(10);
     const trendRail = rail('Trending', '#/trending', trend, x => `${x.n} log${x.n === 1 ? '' : 's'} this week`);
-    const near = nearest(BUILDINGS.filter(b => b.image || photoFor(b.id))).slice(0, 12);
+    const near = loc ? nearest(BUILDINGS.filter(b => b.image || photoFor(b.id))).slice(0, 12) : [];
     const nearRail = rail('Near you', '#/find', near, x => esc(fmtKm(x.d)));
     const feed = items.length ? items.map(feedCard).join('') :
       `<div class="empty">Your feed is empty.<br>Follow some critics to see what they’re rating.</div><button class="btn dashed" data-act="findpeople">${icon('users', 'sm')}Find people</button>`;
@@ -1271,9 +1238,10 @@
     const recentHTML = recent.length ? `<div class="row-flex" style="justify-content:space-between;align-items:baseline;margin-top:6px"><div class="caps">Recent</div><button class="link small" data-act="clearrecent">Clear</button></div>
       <div class="chips">${recent.map(r => `<button class="chip" data-act="recentq" data-k="${esc(r)}">${icon('clock', 'sm')}${esc(r)}</button>`).join('')}</div>` : '';
     const styleOk = b => !findStyle || b.style === findStyle;
-    if (!q && findStyle) return section(`${findStyle} near you`, nearest(BUILDINGS.filter(styleOk)).slice(0, 30).map(placeRow)) + pinLink;
+    if (!q && findStyle) return section(loc ? `${findStyle} near you` : findStyle, nearest(BUILDINGS.filter(styleOk)).slice(0, 30).map(placeRow)) + pinLink;
+    if (!q && !loc) return recentHTML + locPrompt() + pinLink;
     if (!q) return recentHTML + `<button class="game-card" style="margin-top:12px" data-go="#/crawl/near"><span class="game-card-icon">${icon('navigate', 'sm')}</span><span class="grow"><b>Walk near me</b><span class="small muted" style="display:block">A short architecture walk from where you are</span></span>${icon('chevron', 'sm')}</button>`
-      + section(`Nearby · ${locNote()}`, nearest(BUILDINGS).slice(0, 15).map(placeRow)) + pinLink;
+      + section('Nearby', nearest(BUILDINGS).slice(0, 15).map(placeRow)) + pinLink;
     const places = nearest(BUILDINGS.filter(b => b.source !== 'live' && styleOk(b) && [b.name, b.architect, b.city, b.country, b.style, b.typology, KINDS[kindOf(b)]].join(' ').toLowerCase().includes(q))).slice(0, 40);
     const shown = new Set(places.map(x => x.b.id));
     const world = worldQ === findQ.trim() ? worldResults.filter(b => !shown.has(b.id) && styleOk(b)).map(b => ({ b, d: km(loc, b) })) : [];
@@ -1576,12 +1544,8 @@
       }).join('') : `<div class="empty">No critiques yet. Be the first to throw shade.</div>`;
     }
     // Credit the Commons photographer whenever the hero is the Commons image (not a user's photo).
-    const heroPhoto = photoFor(b.id);
-    const heroSeedCredit = heroPhoto && PHOTO_CREDITS[heroPhoto];
-    const heroIsCommons = !heroPhoto && b.image;
-    const credit = heroSeedCredit
-      ? `<div class="credit">Photo: ${esc(heroSeedCredit.artist)}${heroSeedCredit.license ? ' · ' + esc(heroSeedCredit.license) : ''} · <a href="${esc(heroSeedCredit.page)}" target="_blank" rel="noopener">Wikimedia Commons</a></div>`
-      : heroIsCommons && b.credit
+    const heroIsCommons = !photoFor(b.id) && b.image;
+    const credit = heroIsCommons && b.credit
       ? `<div class="credit">Photo: ${esc(b.credit.artist)}${b.credit.license ? ' · ' + esc(b.credit.license) : ''} · <a href="${esc(b.credit.page)}" target="_blank" rel="noopener">Wikimedia Commons</a></div>`
       : heroIsCommons ? `<div class="credit"><a href="${esc(commonsURL(b.image, 1200))}" target="_blank" rel="noopener">Photo: Wikimedia Commons</a></div>` : '';
     const q = encodeURIComponent(b.name + (b.city ? ' ' + b.city : ''));
@@ -1844,7 +1808,7 @@
     if (items.length < 2) {
       return `<div class="screen with-nav">
         <div class="topbar"><button class="btn-sq thin" data-act="back" aria-label="Back">${icon('back')}</button><div class="h1 grow">Crawl Route</div></div>
-        ${styleChips}<div class="pad"><div class="empty">${near ? 'Not enough places within 1.5 km of you for a walk \u2014 try another style, or a different spot.' : 'Need at least 2 places on this list to plan a crawl.'}</div></div>
+        ${styleChips}<div class="pad">${near && !loc ? locPrompt() : `<div class="empty">${near ? 'Not enough places within 1.5 km of you for a walk \u2014 try another style, or a different spot.' : 'Need at least 2 places on this list to plan a crawl.'}</div>`}</div>
       </div>${nav('lists')}`;
     }
     const order = crawlOrder(items);
@@ -3100,7 +3064,8 @@
         <span class="small ${mv ? '' : 'muted'}">${mv ? `Your ${mv.stars}★` : fmtKm(x.d)}</span>
       </button>`;
     }).join('');
-    return (q ? '' : `<div class="caps">Nearby · ${locNote()}</div>`) + (rows || `<div class="empty">No places match “${esc(q)}”.</div>`);
+    if (!q && !loc) return locPrompt();
+    return (q ? '' : `<div class="caps">Nearby</div>`) + (rows || `<div class="empty">No places match “${esc(q)}”.</div>`);
   }
 
   function viewLogPick() {
@@ -3245,7 +3210,7 @@
     el.innerHTML = `<button class="map-card" style="width:calc(100% - 24px)" data-go="#/b/${b.id}">
       ${ph(b, { w: 160, style: 'width:64px;height:64px', go: false })}
       <div class="grow" style="line-height:1.3"><b>${esc(b.name)}</b><div class="small muted">${esc(byLine(b))}</div>
-        <div class="small">${esc(b.city)} · ${fmtKm(km(loc, b))}${mv ? ` · you: ${mv.stars}★` : ''}</div></div>
+        <div class="small">${[esc(b.city), fmtKm(km(loc, b))].filter(Boolean).join(' · ')}${mv ? ` · you: ${mv.stars}★` : ''}</div></div>
       <div style="font-size:20px">${a.avg ? scoreHTML(a.avg.toFixed(1)) : '<span class="small muted">No logs</span>'}</div>
     </button>${(() => {
       const fv = friendVisitors(b.id);
@@ -3425,7 +3390,7 @@
     const target = clusterGroup || map;
     items.forEach(({ b, kind }) => addMarker(b, kind));
     if (clusterGroup) map.addLayer(clusterGroup);
-    window.L.marker([loc.lat, loc.lng], { icon: window.L.divIcon({ className: '', html: '<div class="pin me"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }), interactive: false }).addTo(map);
+    if (loc) window.L.marker([loc.lat, loc.lng], { icon: window.L.divIcon({ className: '', html: '<div class="pin me"></div>', iconSize: [16, 16], iconAnchor: [8, 8] }), interactive: false }).addTo(map);
     // Drop a pin: tap after pressing "Pin", or long-press / right-click anywhere.
     map.on('click', e => { if (pinMode) placePin(e.latlng); });
     map.on('contextmenu', e => placePin(e.latlng));
@@ -3433,7 +3398,8 @@
     const selB = BY_ID[mapSel];
     if (mapFocus && selB) { map.setView([selB.lat, selB.lng], 17); mapFocus = false; }
     else if (mapFilter === 'all' && mapView) map.setView(mapView.c, mapView.z);
-    else if (mapFilter === 'all' || !items.length) map.setView([loc.lat, loc.lng], 13);
+    else if (loc && (mapFilter === 'all' || !items.length)) map.setView([loc.lat, loc.lng], 13);
+    else if (!items.length || (!loc && mapFilter === 'all')) map.setView([30, 0], 2);  // no location yet: whole world
     else map.fitBounds(items.map(x => [x.b.lat, x.b.lng]), { padding: [60, 60], maxZoom: 14 });
     setTimeout(() => map && map.invalidateSize(), 0);
     if (pendingPinMode) { pendingPinMode = false; setPinMode(true); }
@@ -3912,14 +3878,13 @@
   function drawViewer() {
     const el = root.querySelector('.lightbox');
     if (!el || !viewer) return;
-    const { list, i } = viewer, url = list[i], c = PHOTO_CREDITS[url];
+    const { list, i } = viewer, url = list[i];
     el.innerHTML = `
       <div class="lb-top"><span class="lb-count">${list.length > 1 ? `${i + 1} / ${list.length}` : ''}</span>
         <button class="btn-sq lb-close" data-act="lbclose" aria-label="Close">${icon('x')}</button></div>
       <div class="lb-stage" data-act="lbclose"><img src="${url}" alt="Photo ${i + 1} of ${list.length}"></div>
       ${list.length > 1 ? `<button class="btn-sq lb-nav prev" data-act="lbprev" aria-label="Previous photo">${icon('back')}</button>
-        <button class="btn-sq lb-nav next" data-act="lbnext" aria-label="Next photo">${icon('chevron')}</button>` : ''}
-      ${c ? `<div class="lb-credit">Photo: ${esc(c.artist)}${c.license ? ' · ' + esc(c.license) : ''} · <a href="${esc(c.page)}" target="_blank" rel="noopener">Wikimedia Commons</a></div>` : ''}`;
+        <button class="btn-sq lb-nav next" data-act="lbnext" aria-label="Next photo">${icon('chevron')}</button>` : ''}`;
   }
   function stepViewer(d) {
     if (!viewer) return;
@@ -4109,15 +4074,12 @@
       try { res = await authCall('/auth/signup', { id: 'u-' + Date.now().toString(36), handle, name, password }); }
       catch (e) { return toast(e.message === 'Failed to fetch' ? 'Can\u2019t reach the server \u2014 try again' : e.message); }
       setToken(res.token);
-      const id = res.user.id, others = state.users.map(u => u.id).filter(o => o !== id);
+      const id = res.user.id;
       const newUser = Object.assign({}, res.user, pickedPhoto ? { photo: pickedPhoto } : {});
       state.users = state.users.filter(u => u.id !== id).concat(newUser);
       pickedPhoto = undefined;
-      // Start by following everyone already here, so the feed isn't empty.
-      others.forEach(o => { if (!isFollowing(id, o)) state.follows.push([id, o]); });
-      state.lists.filter(l => l.invitesNewUsers).forEach(l => l.members.push(id));
+      // New accounts start following nobody; the empty feed points them to Find people.
       state.me = id; save();
-      others.forEach(o => sync.follow(id, o));
       Sound.success();
       tourIdx = 0; go('#/welcome');
       setTimeout(() => { celebrate(); toast('Welcome, @' + res.user.handle); }, 30);
@@ -4336,11 +4298,16 @@
       fitBeenMap([...new Set(visitsBy(uid).map(v => v.buildingId))].map(id => BY_ID[id]).filter(Boolean));
     },
     mapfilterstoggle() { mapFiltersOpen = !mapFiltersOpen; mapDraft = mapFiltersOpen ? { show: mapFilter, kind: mapKind, styles: new Set(mapStyles), rating: mapMinRating } : null; render(); },
+    uselocation() {
+      requestLocation((ok, why) => {
+        if (ok) return render();
+        toast(why === 'denied' ? 'Location is blocked — allow it for this site in your browser settings' : why === 'unsupported' ? 'This browser can’t share your location' : 'Couldn’t find your location — try again');
+      });
+    },
     locate() {
       requestLocation((ok, why) => {
         if (!ok) {
-          toast(why === 'denied' ? 'Location is blocked — allow it for this site in your browser settings' : 'Couldn’t find you — showing ' + loc.label);
-          if (map) map.setView([loc.lat, loc.lng], 14);
+          toast(why === 'denied' ? 'Location is blocked — allow it for this site in your browser settings' : 'Couldn’t find your location — try again outside or with Wi-Fi on');
           return;
         }
         // Re-render so the "you are here" dot moves too, centred on the new spot.
@@ -4686,6 +4653,7 @@
       if (!text || text === lastStateText) return;
       let data;
       try { data = JSON.parse(text); } catch (e) { return; }
+      dropDemo(data);
       if (!data.users || !data.users.length) return;
       lastStateText = text;
       if (freshInstall && !state.me) state = buildStateFromBackend(data);

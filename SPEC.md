@@ -112,8 +112,6 @@ python tools/fetch_wikidata.py --global 0 --local 400 --radius 20 --city Chicago
 python tools/fetch_wikidata.py --global 450 --local 400 --radius 20 --city Chicago # + worldwide
 ```
 
-**Stand-in photos for seeded posts (`tools/fetch_seed_photos.py`).** For every place a seeded critic posted about, pulls up to 4 photos from the place's Wikimedia Commons category (Wikidata P373) into `app/seed-photos.js`. Seeded posts show 0–4 of them (two critics posting the same place get different shots), each with a photographer/licence credit under the photos. Photos people upload themselves are never replaced.
-
 **Facts (`tools/fetch_facts.py` → `app/facts.js`).** Shown as small icons under a place's name (leaf = sustainability certification, columns = landmark status, medal = awards / Pritzker-winning architect, wheelchair = step-free, ticket = free or paid entry, clock = hours) and listed with sources in About under "Recognition & access".
 
 | Fact | Source |

@@ -69,7 +69,6 @@ Open http://localhost:5173 and use your browser's phone/device mode. By default 
 cd backend
 pip install -r requirements.txt
 export DATABASE_URL=postgresql://user:pass@host/db   # PowerShell: $env:DATABASE_URL = "..."
-python seed.py                                       # optional: demo critics and ratings
 uvicorn app.main:app --reload --port 8000
 ```
 Then load the app with `window.TS_API_BASE = 'http://localhost:8000'`.
@@ -82,12 +81,11 @@ Then load the app with `window.TS_API_BASE = 'http://localhost:8000'`.
 
 ## Building data
 
-- `app/data.js`: hand-picked landmarks worldwide, plus fictional demo critics and their ratings.
-- `app/wikidata.js`, `app/facts.js`, `app/seed-photos.js` are generated; don't edit them by hand:
+- `app/data.js`: hand-picked landmarks worldwide.
+- `app/wikidata.js` and `app/facts.js` are generated; don't edit them by hand:
   ```sh
   python tools/fetch_wikidata.py --global 450 --local 400 --radius 20 --city Chicago
   python tools/fetch_facts.py
-  python tools/fetch_seed_photos.py
   ```
 - Everything else loads live while you use the app.
 
@@ -99,13 +97,12 @@ Then load the app with `window.TS_API_BASE = 'http://localhost:8000'`.
 | `app/app.js` | Routing, views, state, sync with the backend |
 | `app/styles.css` | Design tokens and components (light and dark) |
 | `app/sw.js` | Service worker: offline use and caching |
-| `app/data.js` | Hand-picked places, demo critics, fallback location |
-| `app/wikidata.js`, `app/facts.js`, `app/seed-photos.js` | Generated place data, facts and photos |
+| `app/data.js` | Hand-picked places and style legend |
+| `app/wikidata.js`, `app/facts.js` | Generated place data and facts |
 | `backend/app/main.py` | API endpoints |
 | `backend/app/auth.py` | Password hashing, sessions, login checks |
 | `backend/app/db.py` | Postgres connection and schema |
 | `backend/app/models.py` | Request and response models |
-| `backend/seed.py` | Demo data for a fresh database |
 | `tools/` | Wikidata / Wikipedia / Commons / OpenStreetMap import scripts |
 
 ## Credits

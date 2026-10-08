@@ -1,7 +1,7 @@
 """Pull building data from Wikidata (+ Commons photo credits, Wikipedia intros) into app/wikidata.js.
 
 Usage:  python tools/fetch_wikidata.py [--global 450] [--local 250] [--radius 12]
-        (--global 0 = only the area around TS_DEMO_LOCATION in app/data.js)
+        (--global 0 = only the area around --lat/--lng)
 
 No dependencies beyond the standard library. Writes window.TS_WIKIDATA = { enrich, buildings }:
   enrich    — Wikidata fields for the hand-curated buildings in app/data.js, keyed by their id
@@ -357,11 +357,10 @@ def wiki_titles_to_qids(titles):
 
 def read_seeds():
     src = open(DATA_JS, encoding='utf-8').read()
-    loc = re.search(r"TS_DEMO_LOCATION = \{ lat: (-?[\d.]+), lng: (-?[\d.]+)", src)
     seeds = []
     for m in re.finditer(r"\{ id: '([^']+)', name: (['\"])(.+?)\2, .*?lat: (-?[\d.]+), lng: (-?[\d.]+) \}", src):
         seeds.append({'id': m.group(1), 'name': m.group(3).replace("\\'", "'"), 'lat': float(m.group(4)), 'lng': float(m.group(5))})
-    return seeds, (float(loc.group(1)), float(loc.group(2)))
+    return seeds
 
 
 def km(a, b):
@@ -393,11 +392,13 @@ def main():
     ap.add_argument('--global', dest='n_global', type=int, default=450)
     ap.add_argument('--local', dest='n_local', type=int, default=250)
     ap.add_argument('--radius', type=float, default=12)
-    ap.add_argument('--per-kind', dest='n_kind', type=int, default=80, help='bridges / art / spots to pull around the demo location (0 = none)')
+    ap.add_argument('--per-kind', dest='n_kind', type=int, default=80, help='bridges / art / spots to pull around --lat/--lng (0 = none)')
     ap.add_argument('--city', default='', help='fallback city for local buildings with no usable city')
+    ap.add_argument('--lat', type=float, default=40.7580, help='centre of the local area (default: Midtown Manhattan)')
+    ap.add_argument('--lng', type=float, default=-73.9855)
     args = ap.parse_args()
 
-    seeds, (lat, lng) = read_seeds()
+    seeds, (lat, lng) = read_seeds(), (args.lat, args.lng)
     print(f'{len(seeds)} hand-curated buildings; local centre {lat},{lng}')
 
     g = []
