@@ -1,6 +1,6 @@
 # throwShade — Product Spec
 
-**Status:** Hackathon build v0.9 · **Date:** 2026-09-26
+**Status:** In production · **Updated:** 2026-10-08 (started as a hackathon build, v0.9, 2026-09-26)
 
 > throwShade: a mobile app for logging, rating and sharing the buildings you visit, like Beli for architecture.
 
@@ -12,15 +12,15 @@ throwShade is a phone app for logging and sharing opinions on the buildings you 
 
 The UX borrows from **Beli**, the restaurant app: a friends feed, Been / Want to Visit lists, a map and clean building cards. The visual design follows `Throwing Shade — Screen Map.html` (see §9).
 
-- **Form:** a local web app sized for a phone, recorded for the demo in browser device mode. It is not published to the App Store or Google Play.
+- **Form:** a phone-first web app (installable, works offline for pages already seen) published from `app/` on GitHub Pages, with a FastAPI + Postgres backend on Render. It also lays out for laptops and landscape phones (§5). `app/.well-known/assetlinks.json` links an Android wrapper app (`com.shandonherft.twa`).
 - **Context:** started at AEC Tech Chicago Hackathon 2026; designed and built by Shandon Herft.
 
-## 2. Hackathon goal
+## 2. Core flow
 
-The recorded demo shows this flow end to end:
+The main path through the app:
 
-1. Sign in.
-2. Find a building (search, or nearby).
+1. Sign up or log in (handle + password).
+2. Find a building (search, or nearby once location is shared).
 3. Rate it 1–5 stars, add a note and a photo.
 4. See it in your Been list, on the map and in a friend's feed.
 5. Open a friend's log and save that building to Want to Visit.
@@ -32,9 +32,9 @@ The recorded demo shows this flow end to end:
 | Rating | 1–5 whole stars per log, plus optional "what stood out" chips (Design, Material, Structure, Facade, Light, Space, Interior, Detail, Craft, Context, Landscape, Views, Scale, Vibes, Engineering, Sustainability). No ranking. |
 | Feed | Shows exactly what the person posted: stars, their critique, the chips they picked, and their own photos (0–4). No stock images. |
 | Place types | Buildings, bridges, art (sculpture, murals, installations) and spots (parks, squares, fountains, piers). |
-| Profiles | All profiles and logs are public. No private profiles, no follow approval, no private notes. |
+| Profiles | Public by default. An account can be set private: only its followers see its logs, lists and activity. No follow approval, no private notes. |
 | Architect verification | Left out. |
-| Platform | Local web app, phone-sized. No native build and no backend. |
+| Platform | Web app, phone-first and responsive (§5), with a backend that stores accounts, logs, follows, lists, photos, comments, hearts and stories. No native build. |
 | Design | Minimal restyle of the mockups' layout with icons (§9); spec features win where the mockups differ (no ranks, head-to-head or trails). |
 
 ## 4. Core loop
@@ -47,11 +47,11 @@ The recorded demo shows this flow end to end:
 
 ## 5. Navigation
 
-Five bottom tabs, with the mockups' square icons and a black centre "+".
+Five destinations. On a portrait phone they sit in a floating bottom bar (icons only, black centre search). On laptops and wider (1000px+) the bar becomes a labelled left sidebar with a wider content column, multi-column feed and grids, a full-width map and centred dialogs. On landscape phones (under 500px tall) it becomes a slim icon rail on the left.
 
 | Tab | Route | Purpose |
 | --- | --- | --- |
-| Home | `#/feed` | Feed, with the wordmark |
+| Home | `#/feed` | Greeting with the activity bell, stories, shortcuts, Trending / Near you, then the feed |
 | Lists | `#/lists` | Want to Visit and your custom (shared) lists |
 | Search (centre) | `#/find` | Two tabs, each searched on its own: **Architecture** (places, architects, cities; + on a result rates it) and **Users** (all users, with Follow) |
 | Map | `#/map` | Map of places with type and status filters; drop a pin to add a place |
@@ -63,12 +63,12 @@ Other routes: `#/find` (search places and people), `#/b/<id>` (place), `#/u/<id>
 
 | Screen | What it shows |
 | --- | --- |
-| Sign in | Wordmark; create a user (display name + handle) or continue as a seeded critic |
+| Sign in | Wordmark; log in, or sign up with display name, handle and password |
 | Feed | Exactly what each person posted: avatar, "@maya rated **Salk Institute**", stars, critique, chosen aspects, their own photos; Save / Details |
 | Map | Filter pills (All / Buildings / Bridges / Art / Spots, then Been / Want to Visit / Friends' picks); greyscale map; pins coloured by style (filled = been, ring = want); style legend; Locate; **Pin** (or long-press) to add a building; bottom building card |
 | What's here? (pin) | Mini map + coordinates; buildings already in the app within 120 m; OpenStreetMap buildings at the spot (name, type, address, Wikipedia badge); "+ Name it yourself" form (name, architect, year, style) → rate it |
-| Find | Search field; Buildings tab (nearby when empty) and People tab with Follow buttons |
-| Log 1/2 — Throw Shade | Bottom sheet: search + nearby buildings with distance |
+| Find | Search field; Architecture tab (nearby when empty, or a "See what's near you" prompt until location is shared) and Users tab with Follow buttons |
+| Log 1/2 — Throw Shade | Bottom sheet (a centred dialog on laptops): search + nearby buildings with distance once location is shared |
 | Log 2/2 — Your critique | Five star buttons with caption (Throwing shade → Pilgrimage-worthy), "What stood out?" aspect chips, date visited, up to 4 photos, 280-character critique, Post; Delete when editing |
 | Building | Photo (user's, else Wikimedia Commons with credit line), name, architect · year · typology · city, style chip, community rating and your rating overlaid on the photo's bottom-right, fact icons, what people like (tags with counts), Throw Shade, Save, Directions, About (Wikipedia intro, address, coordinates, links to Wikipedia / OpenStreetMap / ArchDaily search / Dezeen search), Critiques / Photos tabs |
 | Lists | Want to Visit (private) plus custom lists, each with a thumbnail, place count and member avatars; "+" to create a list |
@@ -78,21 +78,22 @@ Other routes: `#/find` (search places and people), `#/b/<id>` (place), `#/u/<id>
 
 ## 7. Data
 
-Everything lives in the browser's `localStorage` under the key `throwingshade.v1`.
+The backend (`backend/`, Postgres) is the source of truth; `GET /state` returns everything the app needs. Each device keeps a working copy in `localStorage` under `throwingshade.v1`, so the app opens instantly and works offline, and writes are mirrored to the backend.
 
 | Collection | Fields |
 | --- | --- |
 | `users` | id, handle, name, bio |
 | `follows` | [followerId, followeeId] |
-| `visits` | id, userId, buildingId, stars (1–5), note, likes (aspect names), photos (0–4 resized JPEG data URLs), visitedOn, createdAt |
+| `visits` | id, userId, buildingId, stars (1–5), note, likes (aspect names), photos (0–4; uploaded to the backend and stored as `/photos/<id>`), visitedOn, createdAt |
 | `want` | userId, buildingId, createdAt |
 | `lists` | id, name, ownerId, members (user ids), items [{buildingId, addedBy, createdAt}], createdAt |
 | `places` | Places users pinned: id (`osm-way-…` or `pin-…`), kind, name, architect, year, typology, style, city, country, lat, lng, address, osm, qid, image, credit, blurb, wiki, source (`osm` / `user`), addedBy, createdAt |
 
-- Buildings are static in `app/data.js` (59 buildings, weighted to New York).
+- Hand-picked buildings are static in `app/data.js` (59 landmarks worldwide).
 - One visit per user per building; logging again updates it and moves it to the top of feeds.
 - Logging a building removes it from your Want to Visit list.
-- New users follow every seeded critic, and the critics follow them back, so a new log shows up in their feeds straight away.
+- New accounts start following no one and join no lists; the empty feed points them to Find people.
+- There is no demo content. Earlier builds shipped fictional critics; the app strips them from old saves and ignores them in server data, and `backend/scripts/remove_demo_data.py` deletes them from the database.
 - If a photo overflows storage, the log saves without the photo.
 
 ## 8. Building data
@@ -101,15 +102,15 @@ Three sources, merged at load in `app.js`:
 
 | Source | What | How |
 | --- | --- | --- |
-| `app/data.js` | 59 hand-picked landmarks worldwide, seeded critics and their logs | Hand-written |
+| `app/data.js` | 59 hand-picked landmarks worldwide and the style legend | Hand-written |
 | `app/wikidata.js` | 568 Chicago-area places: 366 buildings, 58 bridges, 68 artworks, 76 spots (+ Wikidata photos/intros for 57 of the hand-picked landmarks) | Generated by `tools/fetch_wikidata.py` |
 | `state.places` | Buildings users add by dropping a pin | OpenStreetMap at runtime |
 
-**Import (`tools/fetch_wikidata.py`).** Queries Wikidata for everything with a named architect within `--radius` km of `TS_DEMO_LOCATION`, plus up to `--per-kind` bridges, artworks and spots by Wikidata class (bridge; sculpture, statue, mural, installation, public art; park, square, fountain, pier, garden), plus (optionally) the most notable buildings worldwide (`--global N`). It adds photo credits from the Commons API and 2-sentence intros from the Wikipedia API. Hand-picked buildings are pinned via their Wikipedia article titles. Responses are cached in `tools/.cache/`, and the script backs off when Wikimedia rate-limits it.
+**Import (`tools/fetch_wikidata.py`).** Queries Wikidata for everything with a named architect within `--radius` km of `--lat`/`--lng`, plus up to `--per-kind` bridges, artworks and spots by Wikidata class (bridge; sculpture, statue, mural, installation, public art; park, square, fountain, pier, garden), plus (optionally) the most notable buildings worldwide (`--global N`). It adds photo credits from the Commons API and 2-sentence intros from the Wikipedia API. Hand-picked buildings are pinned via their Wikipedia article titles. Responses are cached in `tools/.cache/`, and the script backs off when Wikimedia rate-limits it.
 
 ```sh
-python tools/fetch_wikidata.py --global 0 --local 400 --radius 20 --city Chicago   # Chicago (current)
-python tools/fetch_wikidata.py --global 450 --local 400 --radius 20 --city Chicago # + worldwide
+python tools/fetch_wikidata.py --global 0 --local 400 --radius 20 --city Chicago --lat 41.8826 --lng -87.6233    # Chicago
+python tools/fetch_wikidata.py --global 450 --local 400 --radius 20 --city Chicago --lat 41.8826 --lng -87.6233  # + worldwide
 ```
 
 **Facts (`tools/fetch_facts.py` → `app/facts.js`).** Shown as small icons under a place's name (leaf = sustainability certification, columns = landmark status, medal = awards / Pritzker-winning architect, wheelchair = step-free, ticket = free or paid entry, clock = hours) and listed with sources in About under "Recognition & access".
@@ -129,7 +130,7 @@ python tools/fetch_wikidata.py --global 450 --local 400 --radius 20 --city Chica
 4. If OSM links the building to Wikidata/Wikipedia, the app fetches the photo, intro, year and Commons credit. It ignores Wikidata items without coordinates, which usually means the tag points at a company rather than the building.
 5. Lookups are cached per ~10 m in `localStorage`, and "Name it yourself" always works, even offline.
 
-**Location.** `TS_DEMO_LOCATION` in `data.js` is the Chicago Loop. `force: true` ignores the device's real location, so the recording looks right wherever it's filmed.
+**Location.** There is no fallback location. Until the person shares theirs, Nearby lists, the log picker and "Walk near me" show a "See what's near you" prompt, distances are hidden, and the map opens on a world view.
 
 **Licences.** Wikidata is CC0. Wikipedia intros are CC BY-SA, linked from each building. Commons photos show photographer and licence under the hero. OpenStreetMap data is ODbL and credited on the map. ArchDaily and Dezeen have no public API, so the app only links to their search pages.
 
@@ -148,7 +149,7 @@ Minimal, built on the layout of `Throwing Shade — Screen Map.html`.
   - Shadows are kept only for floating elements: map controls, the map card, the log sheet and toasts.
 - **Controls:**
   - Outlined 10px buttons with one solid black primary button per screen, pill filters, and text-style feed actions ("Want to visit", "Details").
-  - A flat bottom nav with a black "+".
+  - A floating bottom nav on phones; a labelled sidebar on laptops and an icon rail on landscape phones (§5).
   - No Feed/Map toggle; Map is a nav tab.
 - **Icons:** inline line icons after Lucide (ISC licence) in `app.js` (`icon(name)`).
 - **Map:** greyscale OpenStreetMap tiles with style-coloured pins (filled = been, ring = want).
@@ -157,24 +158,23 @@ Minimal, built on the layout of `Throwing Shade — Screen Map.html`.
 
 | Layer | Choice |
 | --- | --- |
-| App | Vanilla HTML/CSS/JS, no build step (`app/index.html`, `styles.css`, `app.js`, `data.js`) |
+| App | Vanilla HTML/CSS/JS, no build step (`app/index.html`, `styles.css`, `app.js`, `data.js`), service worker `sw.js` |
 | Routing | Hash routes |
-| Storage | `localStorage` |
+| Storage | FastAPI + Postgres backend on Render (`render.yaml`); `localStorage` as the on-device copy |
 | Map | Leaflet 1.9.4 from unpkg + OpenStreetMap tiles (needs internet) |
 | Building data | Wikidata SPARQL (build time), Wikipedia + Commons APIs, Overpass + Nominatim (runtime) |
-| Run | Any static server, e.g. `python -m http.server 5173` in `app/` |
+| Hosting | `app/` on GitHub Pages and `backend/` on Render, both deployed from `main` |
+| Run locally | Any static server, e.g. `python -m http.server 5173` in `app/` (talks to the live backend unless `window.TS_API_BASE` is set) |
 
-## 11. Demo checklist
+## 11. Release checklist
 
-- [ ] `TS_DEMO_LOCATION` is the Chicago Loop with `force: true`; re-run the import if the demo city changes.
-- [ ] Rehearse a pin drop on a building that isn't in the list; have one "Name it yourself" spot ready in case Overpass is slow.
-- [ ] Record in Chrome DevTools device mode (iPhone 12/13/14, 390 × 844).
-- [ ] Before each take: **You → Reset demo data**, then create a fresh account.
-- [ ] Run-through: sign up → Feed → "+" → pick a nearby building → 4★, note, photo → Post → Lists → Map "Been" → You → Switch account to @mara.k → your log is at the top of her feed → back as you, "+ Want to Visit" on a friend's card.
-- [ ] Have a photo on the recording machine ready to upload.
-- [ ] Record a backup take in case the network drops and map tiles don't load.
+- [ ] Bump the `?v=` numbers in `app/index.html` for every changed `app.js`, `styles.css` or `data.js`.
+- [ ] Check a portrait phone (390 × 844), a landscape phone (844 × 390) and a laptop window (1000px or wider).
+- [ ] Check sheets and dialogs at all three sizes: log flow, map filters, Wrapped share.
+- [ ] After pushing, reload once on a phone to get past the service worker's cached copy.
+- [ ] Run `backend/scripts/remove_demo_data.py` against the live database once (dry run first).
 
 ## 12. Open questions
 
-- [ ] Run the worldwide import (`--global 450`) once Chicago is signed off.
+- [ ] Make the GitHub repo private: GitHub Pro (keeps Pages), or move `app/` to a Render static site (new address; update the Android wrapper).
 - [ ] Logo: keep the text wordmark, or design one?
