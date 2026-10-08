@@ -966,13 +966,15 @@
       success() { tone(660, 0.09, 'sine', 0.05); tone(880, 0.13, 'sine', 0.05, 0.09); },
     };
   })();
-  // Floating icon-only bar; names live in aria-label / title.
+  // Floating icon-only bar on phones; on wide screens CSS turns it into a labelled sidebar
+  // (the brand and .nav-label spans are hidden on phones). Names live in aria-label / title.
   function nav(active) {
-    const item = (key, href, label, ic) => `<a href="${href}" class="${active === key ? 'on' : ''}" aria-label="${label}" title="${label}">${icon(ic)}${key === 'you' && state.newAchievement ? '<span class="nav-dot"></span>' : ''}</a>`;
+    const item = (key, href, label, ic) => `<a href="${href}" class="nav-${key} ${active === key ? 'on' : ''}" aria-label="${label}" title="${label}">${icon(ic)}<span class="nav-label">${label}</span>${key === 'you' && state.newAchievement ? '<span class="nav-dot"></span>' : ''}</a>`;
     return `<nav class="nav">
+      <a href="#/feed" class="nav-brand" aria-label="throwShade home">${logoSVG(30)}${wordmark('wordmark')}</a>
       ${item('home', '#/feed', 'Home', 'home')}
       ${item('lists', '#/lists', 'Lists', 'bookmark')}
-      <a href="#/find" class="plus ${active === 'find' ? 'on' : ''}" aria-label="Search architecture and people" title="Search">${icon('search')}</a>
+      <a href="#/find" class="plus nav-find ${active === 'find' ? 'on' : ''}" aria-label="Search architecture and people" title="Search">${icon('search')}<span class="nav-label">Search</span></a>
       ${item('map', '#/map', 'Map', 'map')}
       ${item('you', '#/me', 'You', 'user')}
     </nav>`;
@@ -1077,11 +1079,8 @@
   }
 
   function viewHome(tab) {
-    const head = `
-      <div class="topbar">${tab === 'map' ? '<div class="h1">Map</div>' : `<div class="wordmark-group">${logoSVG(30)}${wordmark('wordmark')}</div>`}
-        ${tab === 'map' ? '' : `<a href="#/activity" class="btn-sq thin bell-btn" style="position:relative" aria-label="Activity">${icon('bell')}${unreadActivity(state.me) ? '<span class="nav-dot" style="top:6px;right:6px"></span>' : ''}</a>`}
-      </div>`;
     if (tab === 'map') {
+      const head = `<div class="topbar"><div class="h1">Map</div></div>`;
       const KIND_LABEL = { all: 'All types', building: 'Buildings', bridge: 'Bridges', art: 'Art', spot: 'Spots' };
       const items = mapBuildings();
       const listBody = mapMode === 'list' ? `<div class="screen" style="position:static;flex:1;overflow-y:auto"><div class="stack-6 pad">
@@ -1138,10 +1137,12 @@
     const nearRail = rail('Near you', '#/find', near, x => esc(fmtKm(x.d)));
     const feed = items.length ? items.map(feedCard).join('') :
       `<div class="empty">Your feed is empty.<br>Follow some critics to see what they’re rating.</div><button class="btn dashed" data-act="findpeople">${icon('users', 'sm')}Find people</button>`;
-    return `<div class="screen with-nav">${head}
+    // No wordmark header: the greeting leads the page and the bell sits beside it.
+    return `<div class="screen with-nav">
       <div class="pad home">
-        <div class="hello"><div class="hello-title">${hello}, ${esc((u.name || '').split(' ')[0])}</div>
+        <div class="hello"><div class="grow"><div class="hello-title">${hello}, ${esc((u.name || '').split(' ')[0])}</div>
           <div class="muted small">${mineCount} place${mineCount === 1 ? '' : 's'} rated${activeCount ? ` · ${activeCount} friend${activeCount === 1 ? '' : 's'} posted this week` : ''}</div></div>
+          <a href="#/activity" class="btn-sq thin bell-btn" style="position:relative" aria-label="Activity">${icon('bell')}${unreadActivity(state.me) ? '<span class="nav-dot" style="top:6px;right:6px"></span>' : ''}</a></div>
         ${storyRow()}
         <div class="home-cta-row"><button class="btn on home-cta" data-go="#/find">${icon('plus', 'sm')}Throw some shade</button>
           <button class="btn-sq home-scan" data-go="#/scan" aria-label="Scan a building with your camera">${icon('camera')}</button></div>
@@ -3964,7 +3965,10 @@
     t.className = 'toast'; t.textContent = msg; t.setAttribute('role', 'status');
     root.appendChild(t);
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.remove(), 2400);
+    toastTimer = setTimeout(() => {
+      t.classList.add('out');
+      setTimeout(() => t.remove(), 220);
+    }, 2200);
   }
 
   // ---------- Router ----------
@@ -4077,7 +4081,10 @@
     if (after) { try { after(); } catch (err) { console.error('[throwShade] page setup failed:', err); } }
     if (samePath) {
       const newScreen = root.querySelector('.screen');
-      if (newScreen) newScreen.scrollTop = prevScrollTop;
+      if (newScreen) {
+        newScreen.scrollTop = prevScrollTop;
+        newScreen.classList.add('no-enter');
+      }
     }
 
     if (state.me && !locAsked && ['map', 'find', 'log'].includes(seg[0])) {
@@ -4263,7 +4270,13 @@
       v.hearts = on ? v.hearts.filter(id => id !== state.me) : v.hearts.concat(state.me);
       save(); if (!on) Sound.tap();
       const btn = document.querySelector(`[data-act="heart"][data-id="${d.id}"]`);
-      if (btn) btn.outerHTML = heartBtn(v);
+      if (btn) {
+        btn.outerHTML = heartBtn(v);
+        if (!on) {
+          const fresh = document.querySelector(`[data-act="heart"][data-id="${d.id}"]`);
+          if (fresh) fresh.classList.add('pop');
+        }
+      }
       apiFetch(on ? `/hearts?visit_user_id=${encodeURIComponent(v.userId)}&place_id=${encodeURIComponent(v.buildingId)}` : '/hearts',
         on ? { method: 'DELETE' } : { method: 'POST', body: JSON.stringify({ visit_user_id: v.userId, place_id: v.buildingId }) });
     },
