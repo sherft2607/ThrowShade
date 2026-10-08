@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: throwshade-api
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: throwshade-db
+          property: connectionString
+
+databases:
+  - name: throwshade-db
+    plan: free
+    databaseName: throwshade
+    user: throwshade
